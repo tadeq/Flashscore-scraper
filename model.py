@@ -11,6 +11,9 @@ class Team(database_model):
     table_entries = relationship('TableEntry', back_populates='team')
     home_matches = relationship('Match', foreign_keys='Match.home_team_id', back_populates='home_team')
     away_matches = relationship('Match', foreign_keys='Match.away_team_id', back_populates='away_team')
+    league_id = Column(Integer, ForeignKey('league.id'))
+    league = relationship('League', back_populates='teams')
+    stats = relationship('TeamStats', back_populates='team')
     name = Column(String)
 
 
@@ -41,6 +44,7 @@ class TableEntry(database_model):
 class Table(database_model):
     __tablename__ = 'table'
     id = Column(Integer, primary_key=True)
+    season_id = Column(Integer, ForeignKey('season.id'))
     season = relationship('Season', back_populates='table')
     table_entries = relationship('TableEntry', back_populates='table')
 
@@ -48,7 +52,33 @@ class Table(database_model):
 class Season(database_model):
     __tablename__ = 'season'
     id = Column(Integer, primary_key=True)
-    table_id = Column(Integer, ForeignKey('table.id'))
+    league_id = Column(Integer, ForeignKey('league.id'))
+    league = relationship('League', back_populates='seasons')
     table = relationship('Table', back_populates='season')
     matches = relationship('Match', back_populates='season')
+    teams_stats = relationship('TeamStats', back_populates='season')
+    name = Column(String)
+
+
+class TeamStats(database_model):
+    __tablename__ = 'team_stats'
+    id = Column(Integer, primary_key=True)
+    team_id = Column(Integer, ForeignKey('team.id'))
+    team = relationship('Team', back_populates='stats')
+    season_id = Column(Integer, ForeignKey('season.id'))
+    season = relationship('Season', back_populates='teams_stats')
+    matches_played = Column(Integer)
+    wins = Column(Integer)
+    draws = Column(Integer)
+    losses = Column(Integer)
+    goals_scored = Column(Integer)
+    goals_conceded = Column(Integer)
+    points = Column(Integer)
+
+
+class League(database_model):
+    __tablename__ = 'league'
+    id = Column(Integer, primary_key=True)
+    teams = relationship('Team', back_populates='league')
+    seasons = relationship('Season', back_populates='league')
     name = Column(String)
