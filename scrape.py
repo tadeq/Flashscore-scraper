@@ -32,6 +32,61 @@ def click_league(country, league):
     league.click()
 
 
+def get_table_entries_from_table_div(table_rows_soup, league, table):
+    teams_with_places = {}
+    for row in table_rows_soup:
+        place = row.find('div', class_='table__cell--rank').text.strip()
+        team_name = row.find('span', class_='team_name_span').a.text
+        teams_with_places[team_name] = place
+    teams = db.get_teams_by_league_and_names(league, list(teams_with_places))
+    return [TableEntry(table=table, team=team, place=teams_with_places[team.name]) for team in teams]
+
+
+def find_team_by_name(teams, name):
+    for team in teams:
+        if team.name == name:
+            return team
+    return None
+
+
+def get_team_stats_from_table_div(table_rows_soup, season, teams):
+    teams_stats = []
+    for row in table_rows_soup:
+        team_name = row.find('span', class_='team_name_span')
+        team_name = team_name.a.text
+        team = find_team_by_name(teams, team_name)
+        matches_played = row.find('div', class_='table__cell--matches_played').text
+        wins = row.find('div', class_='table__cell--wins_regular').text
+        draws = row.find('div', class_='table__cell--draws').text
+        losses = row.find('div', class_='table__cell--losses_regular').text
+        goals = row.find('div', class_='table__cell--goals').text.split(':')
+        goals_scored = goals[0]
+        goals_conceded = goals[1]
+        points = row.find('div', class_='table__cell--points').text
+        stats = TeamStats(team=team, season=season, matches_played=matches_played, wins=wins, draws=draws,
+                          losses=losses, goals_scored=goals_scored, goals_conceded=goals_conceded, points=points)
+        teams_stats.append(stats)
+    return teams_stats
+
+
+def scrape_table(league_link, league, season):
+    browser.get(league_link)
+    standings_tab = browser.find_element_by_link_text('Standings')
+    standings_tab.click()
+    inner_standings = browser.find_element_by_id('tabitem-table')
+    inner_standings.click()
+    WebDriverWait(browser, 10).until(EC.presence_of_element_located((By.CLASS_NAME, 'table__body')))
+    source = browser.find_element_by_class_name('table__body').get_attribute('innerHTML')
+    soup = BeautifulSoup(source, 'lxml')
+    table_rows = soup.find_all('div', class_='table__row')
+    table = Table(season=season)
+    table_entries = get_table_entries_from_table_div(table_rows, league, table)
+    db.save_table_entries(table_entries)
+    teams = [entry.team for entry in table_entries]
+    teams_stats = get_team_stats_from_table_div(table_rows, season, teams)
+    db.save_team_stats(teams_stats)
+
+
 def get_season_matches_as_html(league_link):
     browser.get(league_link)
     results_tab = browser.find_element_by_link_text('Results')
@@ -50,38 +105,31 @@ def get_season_matches_as_html(league_link):
     return match_divs
 
 
-def get_team_by_name(teams, name):
-    for team in teams:
-        if team.name == name:
-            return team
-    return None
+def get_match_year(season, date):
+    date_month = int(date.split('.')[1])
+    season_years = season.name.split('/')
+    return date + season_years[0] if date_month < 7 else date + season_years[1]
 
 
-def get_table_entries_from_table_row(table_row_soup):
-    place = table_row_soup.find('div', class_='table__cell--rank')
-    print(place.text.strip())
-    table_row_soup.find('span', class_='team_name_span')
-
-
-def get_team_stats_from_table_row(table_row):
-    pass
-
-
-def scrape_table(league_link, league, season):
-    browser.get(league_link)
-    standings_tab = browser.find_element_by_link_text('Standings')
-    standings_tab.click()
-    WebDriverWait(browser, 10).until(EC.presence_of_element_located((By.CLASS_NAME, 'table__body')))
-    source = browser.find_element_by_class_name('table__body').get_attribute('innerHTML')
-    soup = BeautifulSoup(source, 'lxml')
-    table_rows = soup.find_all('div', class_='table__row')
-    table_entries = [get_table_entries_from_table_row(row) for row in table_rows]
-    teams_stats = [get_team_stats_from_table_row(row) for row in table_rows]
-
-
-def scrape_data(season, season_matches):
-    teams = []
+# has to be done after scrape_table where teams are loaded to database
+def scrape_results(league_link, season):
+    teams = db.get_teams_by_season(season)
+    matches_soup = get_season_matches_as_html(league_link)
     matches = []
+    for match_div in matches_soup:
+        date_time = match_div.find('div', class_='event__time').text
+        date = get_match_year(season, date_time.split(' ')[0])
+        home_team_name = match_div.find('div', class_='event__participant--home').text
+        away_team_name = match_div.find('div', class_='event__participant--away').text
+        home_team = find_team_by_name(teams, home_team_name)
+        away_team = find_team_by_name(teams, away_team_name)
+        score = match_div.find('div', class_='event__scores').text.replace(' ', '').split('-')
+        home_team_score = score[0]
+        away_team_score = score[1]
+        match = Match(season=season, date=date, home_team=home_team, away_team=away_team,
+                      home_team_score=home_team_score, away_team_score=away_team_score)
+        matches.append(match)
+    db.save_matches(matches)
 
 
 def get_years_from_season_name(season_name):
@@ -90,6 +138,7 @@ def get_years_from_season_name(season_name):
 
 if __name__ == '__main__':
     league_name = 'Premier League'
+    db.delete_league_by_name(league_name)
 
     browser.get(main_url)
     more_countries_element = browser.find_element_by_class_name('show-more')
@@ -102,16 +151,16 @@ if __name__ == '__main__':
     archive_button.click()
 
     season_names = browser.find_elements_by_class_name('leagueTable__season')[2:]
-    season_names = [season.find_element_by_tag_name('a') for season in season_names]
+    season_names = [season.find_element_by_tag_name('a') for season in season_names][::-1]
+
     league = League(name=league_name)
+    db.save_league(league)
+
     seasons = [Season(name=get_years_from_season_name(season_name.text), league=league) for season_name in season_names]
 
-    links = [season.get_attribute('href') for season in season_names][::-1]
+    links = [season.get_attribute('href') for season in season_names]
 
     scrape_table(links[0], league, seasons[0])
-
-    # season_matches = get_season_matches_as_html(links[0])
-    # for match in season_matches:
-    #     print(match.prettify())
+    scrape_results(links[0], seasons[0])
 
     browser.quit()

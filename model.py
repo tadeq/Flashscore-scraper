@@ -46,7 +46,7 @@ class Table(database_model):
     id = Column(Integer, primary_key=True)
     season_id = Column(Integer, ForeignKey('season.id'))
     season = relationship('Season', back_populates='table')
-    table_entries = relationship('TableEntry', back_populates='table')
+    table_entries = relationship('TableEntry', back_populates='table', cascade='delete')
 
 
 class Season(database_model):
@@ -54,9 +54,9 @@ class Season(database_model):
     id = Column(Integer, primary_key=True)
     league_id = Column(Integer, ForeignKey('league.id'))
     league = relationship('League', back_populates='seasons')
-    table = relationship('Table', back_populates='season')
-    matches = relationship('Match', back_populates='season')
-    teams_stats = relationship('TeamStats', back_populates='season')
+    table = relationship('Table', back_populates='season', cascade='delete')
+    matches = relationship('Match', back_populates='season', cascade='delete')
+    teams_stats = relationship('TeamStats', back_populates='season', cascade='delete')
     name = Column(String)
 
 
@@ -79,6 +79,6 @@ class TeamStats(database_model):
 class League(database_model):
     __tablename__ = 'league'
     id = Column(Integer, primary_key=True)
-    teams = relationship('Team', back_populates='league')
-    seasons = relationship('Season', back_populates='league')
+    teams = relationship('Team', back_populates='league', cascade='delete')
+    seasons = relationship('Season', back_populates='league', cascade='delete')
     name = Column(String)
