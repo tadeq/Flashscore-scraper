@@ -81,4 +81,5 @@ class League(database_model):
     id = Column(Integer, primary_key=True)
     teams = relationship('Team', back_populates='league', cascade='delete')
     seasons = relationship('Season', back_populates='league', cascade='delete')
+    country = Column(String)
     name = Column(String)

@@ -1,35 +1,45 @@
+import re
+import sys
+import time
+
 from bs4 import BeautifulSoup
 from selenium import webdriver
 from selenium.common.exceptions import StaleElementReferenceException
 from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-import time
-import re
-from model import Team, Match, TableEntry, Table, Season, TeamStats, League
+from selenium.webdriver.support.ui import WebDriverWait
+
 from db_connection import DatabaseConnection
+from model import Match, TableEntry, Table, Season, TeamStats, League
 
 browser = webdriver.Firefox(executable_path='geckodriver-v0.26.0-linux64/geckodriver')
 main_url = 'https://www.flashscore.com'
 db = DatabaseConnection('test.db')
+
+countries_leagues = {'England': 'Premier League', 'Spain': 'LaLiga', 'Italy': 'Serie A', 'Germany': 'Bundesliga',
+                     'France': 'League 1', 'Portugal': 'Primeira Liga', 'Russia': 'Premier League',
+                     'Netherlands': 'Eredivisie', 'Turkey': 'Super Lig'}
 
 
 def execute_script_click(button):
     browser.execute_script('arguments[0].click();', button)
 
 
-def click_league(country, league):
+def click_league(country, league_name):
     left_panel = browser.find_element_by_id('lc')
     countries_menus = left_panel.find_elements_by_class_name('mbox0px')
     countries_lists = [menu.find_element_by_class_name('menu') for menu in countries_menus]
     countries_lists = [countries_list for countries_list in countries_lists]
     found_countries = [element.find_elements_by_link_text(country) for element in countries_lists]
     found_countries = [found_country for found_country in found_countries if len(found_country) > 0]
-    if found_countries and found_countries[0]:
-        found_countries = found_countries[0][0]
-    execute_script_click(found_countries)
-    league = left_panel.find_element_by_link_text(league)
-    league.click()
+    found_country = found_countries[0][0] if found_countries and found_countries[0] else None
+    execute_script_click(found_country)
+
+    time.sleep(2)
+    found_league = left_panel.find_element_by_link_text(country).find_element_by_xpath('..').find_element_by_class_name(
+        'submenu').find_element_by_link_text(league_name)
+    found_league_link = found_league.get_attribute('href')
+    browser.get(found_league_link)
 
 
 def get_table_entries_from_table_div(table_rows_soup, league, table):
@@ -73,6 +83,7 @@ def scrape_table(league_link, league, season):
     browser.get(league_link)
     standings_tab = browser.find_element_by_link_text('Standings')
     standings_tab.click()
+    WebDriverWait(browser, 10).until(EC.element_to_be_clickable((By.ID, 'tabitem-table')))
     inner_standings = browser.find_element_by_id('tabitem-table')
     inner_standings.click()
     WebDriverWait(browser, 10).until(EC.presence_of_element_located((By.CLASS_NAME, 'table__body')))
@@ -87,7 +98,22 @@ def scrape_table(league_link, league, season):
     db.save_team_stats(teams_stats)
 
 
-def get_season_matches_as_html(league_link):
+def calculate_dropped_elements(headers_and_match_divs, league_name):
+    dropped_elements = []
+    drop = True
+    for ind, element in enumerate(headers_and_match_divs):
+        if drop:
+            dropped_elements.append(ind)
+        if element['class'][0] == 'event__header':
+            header_name = element.find('span', class_='event__title--name').text
+            previous_drop = drop
+            drop = header_name != league_name
+            if previous_drop != drop and not previous_drop:
+                dropped_elements.append(ind)
+    return dropped_elements
+
+
+def get_season_matches_as_html(league_link, league_name):
     browser.get(league_link)
     results_tab = browser.find_element_by_link_text('Results')
     results_tab.click()
@@ -99,22 +125,29 @@ def get_season_matches_as_html(league_link):
             time.sleep(3)
         except StaleElementReferenceException as exc:
             more_matches = False
-    source = browser.find_element_by_class_name('event').get_attribute('innerHTML')
+    source = browser.find_element_by_class_name('event--results').get_attribute('innerHTML')
     soup = BeautifulSoup(source, 'lxml')
-    match_divs = soup.find_all('div', class_='event__match')
+    headers_and_match_divs = soup.find_all('div', class_=['event__match', 'event__header'])
+
+    # drop matches from results e.g. if there were additional relegation matches or play-offs
+    dropped_elements_indexes = calculate_dropped_elements(headers_and_match_divs, league_name)
+    match_divs = [element for ind, element in enumerate(headers_and_match_divs) if ind not in dropped_elements_indexes]
     return match_divs
 
 
 def get_match_year(season, date):
-    date_month = int(date.split('.')[1])
     season_years = season.name.split('/')
-    return date + season_years[0] if date_month < 7 else date + season_years[1]
+    if len(season_years) == 1:
+        return date + season_years[0]
+    else:
+        date_month = int(date.split('.')[1])
+        return date + season_years[0] if date_month < 7 else date + season_years[1]
 
 
 # has to be done after scrape_table where teams are loaded to database
-def scrape_results(league_link, season):
+def scrape_results(league_link, league, season):
     teams = db.get_teams_by_season(season)
-    matches_soup = get_season_matches_as_html(league_link)
+    matches_soup = get_season_matches_as_html(league_link, league.name)
     matches = []
     for match_div in matches_soup:
         date_time = match_div.find('div', class_='event__time').text
@@ -133,11 +166,15 @@ def scrape_results(league_link, season):
 
 
 def get_years_from_season_name(season_name):
-    return re.search('[0-9][0-9][0-9][0-9]/[0-9][0-9][0-9][0-9]', season_name).group()
+    two_years_season_name = re.search('[0-9][0-9][0-9][0-9]/[0-9][0-9][0-9][0-9]', season_name)
+    if two_years_season_name is not None:
+        return two_years_season_name.group()
+    else:
+        return re.search('[0-9][0-9][0-9][0-9]', season_name).group()
 
 
-if __name__ == '__main__':
-    league_name = 'Premier League'
+def scrape_league_history(country):
+    league_name = countries_leagues[country]
     db.delete_league_by_name(league_name)
 
     browser.get(main_url)
@@ -145,7 +182,7 @@ if __name__ == '__main__':
     more_countries_button = more_countries_element.find_element_by_link_text('More')
     execute_script_click(more_countries_button)
 
-    click_league('England', league_name)
+    click_league(country, league_name)
 
     archive_button = browser.find_element_by_link_text('Archive')
     archive_button.click()
@@ -153,14 +190,21 @@ if __name__ == '__main__':
     season_names = browser.find_elements_by_class_name('leagueTable__season')[2:]
     season_names = [season.find_element_by_tag_name('a') for season in season_names][::-1]
 
-    league = League(name=league_name)
+    league = League(name=league_name, country=country)
     db.save_league(league)
 
     seasons = [Season(name=get_years_from_season_name(season_name.text), league=league) for season_name in season_names]
-
     links = [season.get_attribute('href') for season in season_names]
 
-    scrape_table(links[0], league, seasons[0])
-    scrape_results(links[0], seasons[0])
+    for season, link in zip(seasons, links):
+        scrape_table(link, league, season)
+        scrape_results(link, league, season)
 
+
+if __name__ == '__main__':
+    available_countries = list(countries_leagues)
+    countries_to_scrape = sys.argv[1:]
+    for country in countries_to_scrape:
+        if country in available_countries:
+            scrape_league_history(country)
     browser.quit()
