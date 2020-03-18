@@ -1,3 +1,4 @@
+import argparse
 import re
 import sys
 import time
@@ -12,12 +13,11 @@ from selenium.webdriver.support.ui import WebDriverWait
 from db_connection import DatabaseConnection
 from model import Match, TableEntry, Table, Season, TeamStats, League
 
-browser = webdriver.Firefox(executable_path='geckodriver-v0.26.0-linux64/geckodriver')
 main_url = 'https://www.flashscore.com'
 db = DatabaseConnection('test.db')
 
 countries_leagues = {'England': 'Premier League', 'Spain': 'LaLiga', 'Italy': 'Serie A', 'Germany': 'Bundesliga',
-                     'France': 'League 1', 'Portugal': 'Primeira Liga', 'Russia': 'Premier League',
+                     'France': 'Ligue 1', 'Portugal': 'Primeira Liga', 'Russia': 'Premier League',
                      'Netherlands': 'Eredivisie', 'Turkey': 'Super Lig'}
 
 
@@ -85,7 +85,7 @@ def scrape_table(league_link, league, season):
     standings_tab.click()
     WebDriverWait(browser, 10).until(EC.element_to_be_clickable((By.ID, 'tabitem-table')))
     inner_standings = browser.find_element_by_id('tabitem-table')
-    inner_standings.click()
+    execute_script_click(inner_standings)
     WebDriverWait(browser, 10).until(EC.presence_of_element_located((By.CLASS_NAME, 'table__body')))
     source = browser.find_element_by_class_name('table__body').get_attribute('innerHTML')
     soup = BeautifulSoup(source, 'lxml')
@@ -117,6 +117,7 @@ def get_season_matches_as_html(league_link, league_name):
     browser.get(league_link)
     results_tab = browser.find_element_by_link_text('Results')
     results_tab.click()
+    WebDriverWait(browser, 10).until(EC.presence_of_element_located((By.CLASS_NAME, 'event__more')))
     more_button = browser.find_element_by_class_name('event__more')
     more_matches = more_button is not None
     while more_matches:
@@ -202,9 +203,21 @@ def scrape_league_history(country):
 
 
 if __name__ == '__main__':
+    args_parser = argparse.ArgumentParser()
+    args_parser.add_argument('-s', '--os', choices=['linux', 'windows'], default='windows',
+                             help='operating system to run the script on')
+    args_parser.add_argument('-b', '--browser', choices=['firefox', 'chrome'], default='chrome',
+                             help='browser to perform scraping with')
+    args_parser.add_argument('-l', '--leagues', nargs='+', choices=list(countries_leagues.keys()), required=True,
+                             help='names of countries from which data from the highest leagues are to be scraped')
+    args = args_parser.parse_args()
+    webdriver_name = 'chromedriver' if args.browser == 'chrome' else 'geckodriver'
+    webdriver_extension = '.exe' if args.os == 'windows' else ''
+    webdriver_path = 'webdrivers/{}/{}/{}{}'.format(args.browser, args.os, webdriver_name, webdriver_extension)
+    browser = webdriver.Chrome(executable_path=webdriver_path)
     available_countries = list(countries_leagues)
     countries_to_scrape = sys.argv[1:]
-    for country in countries_to_scrape:
-        if country in available_countries:
-            scrape_league_history(country)
+    for country_name in countries_to_scrape:
+        if country_name in available_countries:
+            scrape_league_history(country_name)
     browser.quit()
