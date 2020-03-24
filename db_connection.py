@@ -1,7 +1,9 @@
 import os
+
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from model import database_model, Team, Match, TableEntry, Table, Season, TeamStats, League
+
+from model import database_model, Team, TeamStats, League
 
 
 class DatabaseConnection:

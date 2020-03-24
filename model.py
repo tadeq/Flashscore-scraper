@@ -1,6 +1,6 @@
 from sqlalchemy import Column, ForeignKey, Integer, String
-from sqlalchemy.orm import relationship
 from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import relationship
 
 database_model = declarative_base()
 
@@ -34,19 +34,11 @@ class Match(database_model):
 class TableEntry(database_model):
     __tablename__ = 'table_entry'
     id = Column(Integer, primary_key=True)
-    table_id = Column(Integer, ForeignKey('table.id'))
-    table = relationship('Table', back_populates='table_entries')
+    season_id = Column(Integer, ForeignKey('season.id'))
+    season = relationship('Season', back_populates='table_entries')
     team_id = Column(Integer, ForeignKey('team.id'))
     team = relationship('Team', back_populates='table_entries')
     place = Column(Integer)
-
-
-class Table(database_model):
-    __tablename__ = 'table'
-    id = Column(Integer, primary_key=True)
-    season_id = Column(Integer, ForeignKey('season.id'))
-    season = relationship('Season', back_populates='table')
-    table_entries = relationship('TableEntry', back_populates='table', cascade='delete')
 
 
 class Season(database_model):
@@ -54,10 +46,10 @@ class Season(database_model):
     id = Column(Integer, primary_key=True)
     league_id = Column(Integer, ForeignKey('league.id'))
     league = relationship('League', back_populates='seasons')
-    table = relationship('Table', back_populates='season', cascade='delete')
     matches = relationship('Match', back_populates='season', cascade='delete')
     teams_stats = relationship('TeamStats', back_populates='season', cascade='delete')
     name = Column(String)
+    table_entries = relationship('TableEntry', back_populates='season', cascade='delete')
 
 
 class TeamStats(database_model):

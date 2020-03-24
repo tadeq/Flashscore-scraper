@@ -1,6 +1,5 @@
 import argparse
 import re
-import sys
 import time
 
 from bs4 import BeautifulSoup
@@ -11,7 +10,7 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 
 from db_connection import DatabaseConnection
-from model import Match, TableEntry, Table, Season, TeamStats, League
+from model import Match, TableEntry, Season, TeamStats, League
 
 main_url = 'https://www.flashscore.com'
 db = DatabaseConnection('test.db')
@@ -42,14 +41,14 @@ def click_league(country, league_name):
     browser.get(found_league_link)
 
 
-def get_table_entries_from_table_div(table_rows_soup, league, table):
+def get_table_entries_from_table_div(table_rows_soup, league, season):
     teams_with_places = {}
     for row in table_rows_soup:
         place = row.find('div', class_='table__cell--rank').text.strip()
         team_name = row.find('span', class_='team_name_span').a.text
         teams_with_places[team_name] = place
     teams = db.get_teams_by_league_and_names(league, list(teams_with_places))
-    return [TableEntry(table=table, team=team, place=teams_with_places[team.name]) for team in teams]
+    return [TableEntry(season=season, team=team, place=teams_with_places[team.name]) for team in teams]
 
 
 def find_team_by_name(teams, name):
@@ -90,8 +89,7 @@ def scrape_table(league_link, league, season):
     source = browser.find_element_by_class_name('table__body').get_attribute('innerHTML')
     soup = BeautifulSoup(source, 'lxml')
     table_rows = soup.find_all('div', class_='table__row')
-    table = Table(season=season)
-    table_entries = get_table_entries_from_table_div(table_rows, league, table)
+    table_entries = get_table_entries_from_table_div(table_rows, league, season)
     db.save_table_entries(table_entries)
     teams = [entry.team for entry in table_entries]
     teams_stats = get_team_stats_from_table_div(table_rows, season, teams)
@@ -216,7 +214,7 @@ if __name__ == '__main__':
     webdriver_path = 'webdrivers/{}/{}/{}{}'.format(args.browser, args.os, webdriver_name, webdriver_extension)
     browser = webdriver.Chrome(executable_path=webdriver_path)
     available_countries = list(countries_leagues)
-    countries_to_scrape = sys.argv[1:]
+    countries_to_scrape = args.leagues
     for country_name in countries_to_scrape:
         if country_name in available_countries:
             scrape_league_history(country_name)
